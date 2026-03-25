@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
@@ -35,6 +35,10 @@ def main_menu() -> ReplyKeyboardMarkup:
     )
 
 
+def local_now() -> datetime:
+    return datetime.now(ZoneInfo(settings.tz))
+
+
 async def answer_with_menu(message: Message, text: str) -> None:
     await message.answer(text, reply_markup=main_menu())
 
@@ -61,10 +65,7 @@ async def sync_job(silent: bool = False) -> None:
 async def reminder_job() -> None:
     rows, now = service.due_notifications()
     for row in rows:
-        text = (
-            f"⏰ Напоминание ({row['reminder_code']})\n\n"
-            + service.format_event(row)
-        )
+        text = service.format_reminder_header(row) + "\n\n" + service.format_event(row)
         await notify_all(text)
         service.mark_sent(row["event_uid"], row["reminder_code"], now)
 
@@ -73,6 +74,7 @@ async def reminder_job() -> None:
 async def cmd_start(message: Message) -> None:
     await answer_with_menu(
         message,
+        "Бот активен.\n\n"
         "Команды:\n"
         "/today — события на сегодня\n"
         "/tomorrow — события на завтра\n"
@@ -84,45 +86,28 @@ async def cmd_start(message: Message) -> None:
 
 @dp.message(Command("today"))
 async def cmd_today(message: Message) -> None:
-    await answer_with_menu(message, service.events_for_date(date.today().isoformat()))
-    await answer_with_menu(
-        message,
-        "Команды:\n"
-        "/today — события на сегодня\n"
-        "/tomorrow — события на завтра\n"
-        "/date YYYY-MM-DD — события на дату\n"
-        "/next — ближайшие события\n"
-        "/reload — принудительно обновить таблицу"
-    )
+    today = local_now().date()
+    await answer_with_menu(message, service.events_for_date(today.isoformat()))
 
+
+@dp.message(Command("chatid"))
+async def cmd_chatid(message: Message) -> None:
+    await answer_with_menu(
+    message,
+    f"chat_id: {message.chat.id}\n"
+    f"type: {message.chat.type}\n"
+    f"title: {message.chat.title or 'private'}"
+    )
 
 @dp.message(Command("tomorrow"))
 async def cmd_tomorrow(message: Message) -> None:
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = local_now().date() + timedelta(days=1)
     await answer_with_menu(message, service.events_for_date(tomorrow.isoformat()))
-    await answer_with_menu(
-        message,
-        "Команды:\n"
-        "/today — события на сегодня\n"
-        "/tomorrow — события на завтра\n"
-        "/date YYYY-MM-DD — события на дату\n"
-        "/next — ближайшие события\n"
-        "/reload — принудительно обновить таблицу"
-    )
 
 
 @dp.message(Command("next"))
 async def cmd_next(message: Message) -> None:
     await answer_with_menu(message, service.next_events(limit=10))
-    await answer_with_menu(
-        message,
-        "Команды:\n"
-        "/today — события на сегодня\n"
-        "/tomorrow — события на завтра\n"
-        "/date YYYY-MM-DD — события на дату\n"
-        "/next — ближайшие события\n"
-        "/reload — принудительно обновить таблицу"
-    )
 
 
 @dp.message(Command("reload"))
@@ -131,15 +116,6 @@ async def cmd_reload(message: Message) -> None:
     await answer_with_menu(
         message,
         f"✅ Таблица обновлена. Активных событий: {stats['active_events']}"
-    )
-    await answer_with_menu(
-        message,
-        "Команды:\n"
-        "/today — события на сегодня\n"
-        "/tomorrow — события на завтра\n"
-        "/date YYYY-MM-DD — события на дату\n"
-        "/next — ближайшие события\n"
-        "/reload — принудительно обновить таблицу"
     )
 
 
@@ -157,15 +133,6 @@ async def cmd_date(message: Message) -> None:
         return
 
     await answer_with_menu(message, service.events_for_date(requested.isoformat()))
-    await answer_with_menu(
-        message,
-        "Команды:\n"
-        "/today — события на сегодня\n"
-        "/tomorrow — события на завтра\n"
-        "/date YYYY-MM-DD — события на дату\n"
-        "/next — ближайшие события\n"
-        "/reload — принудительно обновить таблицу"
-    )
 
 
 @dp.message(F.text)
@@ -188,9 +155,11 @@ async def main() -> None:
         minute=0,
         kwargs={"silent": False},
     )
-    scheduler.add_job(reminder_job, "interval", minutes=10)
-    scheduler.start()
 
+    # Проверка напоминаний каждую минуту
+    scheduler.add_job(reminder_job, "interval", minutes=1)
+
+    scheduler.start()
     await dp.start_polling(bot)
 
 

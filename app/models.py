@@ -7,6 +7,8 @@ from datetime import datetime
 @dataclass(slots=True)
 class CourtEvent:
     event_uid: str
+    event_type: str  
+    source_field: str  
     case_number: str | None
     claimant: str | None
     respondent: str | None

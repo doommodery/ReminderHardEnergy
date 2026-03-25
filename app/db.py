@@ -10,6 +10,8 @@ from app.config import settings
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
     event_uid TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    source_field TEXT NOT NULL,
     case_number TEXT,
     claimant TEXT,
     respondent TEXT,
@@ -33,13 +35,26 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_events_event_datetime ON events(event_datetime);
 CREATE INDEX IF NOT EXISTS idx_events_active ON events(is_active);
+CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 """
+
+
+def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    existing = {row[1] for row in rows}
+    if column_name not in existing:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
 def init_db() -> None:
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(settings.db_path) as conn:
         conn.executescript(SCHEMA)
+
+        # Мягкая миграция для уже существующей БД.
+        _ensure_column(conn, "events", "event_type", "TEXT NOT NULL DEFAULT 'hearing'")
+        _ensure_column(conn, "events", "source_field", "TEXT NOT NULL DEFAULT 'Дата судебного заседания'")
+
         conn.commit()
 
 
